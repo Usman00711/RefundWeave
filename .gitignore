@@ -3,7 +3,8 @@
 __pycache__/
 *.pyc
 *.db
-.chainlit/
+.chainlit/*
+!.chainlit/config.toml
 chainlit.md
 *.egg-info/
 dist/

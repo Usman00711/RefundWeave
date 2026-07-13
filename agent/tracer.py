@@ -1,10 +1,11 @@
 """Terminal reasoning tracer — prints a live structured log during agent execution."""
 import json
 from datetime import datetime
+
 from rich.console import Console
 from rich.panel import Panel
-from rich.text import Text
 from rich.rule import Rule
+from rich.text import Text
 
 console = Console()
 

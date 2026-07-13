@@ -1,13 +1,22 @@
-"""Seed script: creates and populates sole_syntax.db with 15 customers and orders."""
-import os
-import sqlite3
+"""Repeatable seed script for the migrated customer-support database."""
+
+import argparse
 from datetime import date, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "sole_syntax.db")
+from sqlalchemy import delete, func, select
+
+from infrastructure.database import get_database_url, get_session_factory
+from infrastructure.models import (
+    Customer,
+    EscalationTicket,
+    Order,
+    RefundEvent,
+    RefundRequest,
+)
 
 
-def get_date(days_ago: int) -> str:
-    return (date.today() - timedelta(days=days_ago)).isoformat()
+def get_date(days_ago: int) -> date:
+    return date.today() - timedelta(days=days_ago)
 
 
 CUSTOMERS = [
@@ -49,52 +58,62 @@ ORDERS = [
 ]
 
 
-def seed():
-    if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
+def seed(*, reset: bool = False, database_url: str | None = None) -> bool:
+    """Seed an empty database, or reset all demo records when explicitly requested."""
+    session_factory = get_session_factory(database_url or get_database_url())
+    with session_factory.begin() as session:
+        existing = session.scalar(select(func.count()).select_from(Customer))
+        if existing and not reset:
+            print("Seed skipped: customer data already exists. Use --reset to restore demo data.")
+            return False
 
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+        if reset:
+            session.execute(delete(RefundEvent))
+            session.execute(delete(RefundRequest))
+            session.execute(delete(EscalationTicket))
+            session.execute(delete(Order))
+            session.execute(delete(Customer))
 
-    cur.execute("""
-        CREATE TABLE customers (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            phone TEXT,
-            loyalty_tier TEXT DEFAULT 'Standard',
-            annual_spend REAL DEFAULT 0.0
+        session.add_all(
+            Customer(
+                id=customer[0],
+                name=customer[1],
+                email=customer[2],
+                phone=customer[3],
+                loyalty_tier=customer[4],
+                annual_spend=customer[5],
+            )
+            for customer in CUSTOMERS
         )
-    """)
-
-    cur.execute("""
-        CREATE TABLE orders (
-            order_id TEXT PRIMARY KEY,
-            customer_id INTEGER NOT NULL,
-            product TEXT NOT NULL,
-            size INTEGER,
-            price REAL NOT NULL,
-            discount_pct INTEGER DEFAULT 0,
-            delivery_date TEXT NOT NULL,
-            status TEXT DEFAULT 'delivered',
-            condition TEXT DEFAULT 'unworn',
-            has_receipt INTEGER DEFAULT 1,
-            is_defective INTEGER DEFAULT 0,
-            refund_status TEXT DEFAULT 'none',
-            FOREIGN KEY (customer_id) REFERENCES customers(id)
+        session.flush()
+        session.add_all(
+            Order(
+                order_id=order[0],
+                customer_id=order[1],
+                product=order[2],
+                size=order[3],
+                price=order[4],
+                discount_pct=order[5],
+                delivery_date=order[6],
+                status=order[7],
+                condition=order[8],
+                has_receipt=order[9],
+                is_defective=order[10],
+                refund_status="none",
+            )
+            for order in ORDERS
         )
-    """)
 
-    cur.executemany("INSERT INTO customers VALUES (?,?,?,?,?,?)", CUSTOMERS)
-    cur.executemany("INSERT INTO orders VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                    [(o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8],
-                      int(o[9]), int(o[10]), "none") for o in ORDERS])
-
-    conn.commit()
-    conn.close()
-    print(f"Database seeded at {DB_PATH}")
-    print(f"  {len(CUSTOMERS)} customers | {len(ORDERS)} orders")
+    print(f"Database seeded: {len(CUSTOMERS)} customers | {len(ORDERS)} orders")
+    return True
 
 
 if __name__ == "__main__":
-    seed()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete transactional demo data and restore all seed scenarios.",
+    )
+    arguments = parser.parse_args()
+    seed(reset=arguments.reset)

@@ -1,13 +1,29 @@
-import json
+from uuid import uuid4
+
 import chainlit as cl
-from langchain_core.messages import HumanMessage, AIMessage
-from agent.graph import graph
+from langchain_core.messages import HumanMessage
+
 from agent import tracer
+from agent.graph import build_graph
+
+CUSTOMER_ERROR_MESSAGE = (
+    "⚠️ I couldn't complete that request right now. Please try again in a moment."
+)
+
+WORKFLOW_LABELS = {
+    "identify_customer": "Identify customer",
+    "verify_order": "Verify order ownership",
+    "evaluate_policy": "Evaluate refund policy",
+    "request_confirmation": "Wait for confirmation",
+    "execute_refund": "Execute confirmed refund",
+    "policy_response": "Explain policy decision",
+    "escalate": "Escalate to supervisor",
+}
 
 
 @cl.on_chat_start
 async def on_chat_start():
-    cl.user_session.set("messages", [])
+    cl.user_session.set("thread_id", str(uuid4()))
     await cl.Message(
         content=(
             "👟 **Welcome to Sole Syntax Customer Support!**\n\n"
@@ -16,81 +32,39 @@ async def on_chat_start():
             "- Your **email address** or **full name**\n"
             "- Your **Order ID** (e.g. `ORD-001`)\n"
             "- A brief description of your issue\n\n"
-            "*You can also use the 🎤 floating mic button to speak your request.*"
+            "*Refunds are never executed until you explicitly confirm them.*"
         )
     ).send()
 
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    history = cl.user_session.get("messages", [])
-    history.append(HumanMessage(content=message.content))
-
-    state = {"messages": history}
-    final_text = ""
-    current_step = None
-    current_tool_name = ""
-    response_msg = None  # streaming message for final reply
-
+    thread_id = cl.user_session.get("thread_id") or str(uuid4())
+    cl.user_session.set("thread_id", thread_id)
+    config = {"configurable": {"thread_id": thread_id}}
     tracer.log_session_start(message.content)
 
     try:
-        async for event in graph.astream_events(state, version="v2"):
-            kind = event["event"]
+        result = await build_graph().ainvoke(
+            {"messages": [HumanMessage(content=message.content)]},
+            config=config,
+        )
+        activities = result.get("activity_log", [])
+        for index, node in enumerate(result.get("turn_trace", [])):
+            if node not in WORKFLOW_LABELS:
+                continue
+            step = cl.Step(name=f"✓ {WORKFLOW_LABELS[node]}", type="tool")
+            step.output = activities[index] if index < len(activities) else "Completed safely."
+            await step.send()
 
-            # Show each tool call as a live reasoning step in UI + terminal
-            if kind == "on_tool_start":
-                current_tool_name = event["name"]
-                tool_input = event["data"].get("input", {})
-
-                tracer.log_tool_call(current_tool_name, tool_input)
-
-                current_step = cl.Step(name=f"🔧 {current_tool_name}", type="tool")
-                await current_step.send()
-                current_step.input = json.dumps(tool_input, indent=2)
-                await current_step.update()
-
-            elif kind == "on_tool_end":
-                if current_step:
-                    output = event["data"].get("output", "")
-                    if hasattr(output, "content"):
-                        output = output.content
-                    output_str = str(output)
-
-                    is_denial = "DENIED" in output_str.upper()
-                    tracer.log_tool_result(current_tool_name, output_str, is_denial=is_denial)
-
-                    current_step.output = output_str
-                    await current_step.update()
-                    current_step = None
-
-            # Stream final text response token by token
-            elif kind == "on_chat_model_stream":
-                chunk = event["data"].get("chunk")
-                if chunk and hasattr(chunk, "content") and chunk.content:
-                    # Skip tool-calling turns — those produce tool_call_chunks, not content
-                    tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
-                    if not tool_call_chunks:
-                        token = chunk.content if isinstance(chunk.content, str) else str(chunk.content)
-                        if token:
-                            if response_msg is None:
-                                response_msg = cl.Message(content="")
-                                await response_msg.send()
-                            await response_msg.stream_token(token)
-                            final_text += token
-
-    except Exception as e:
-        err = f"Agent error: {e}"
-        tracer.log_error(err)
-        await cl.Message(content=f"⚠️ {err}").send()
+        final_text = result.get("response_text", "")
+        if not final_text:
+            raise RuntimeError("Workflow completed without a customer response.")
+        tracer.log_agent_response(final_text)
+        await cl.Message(content=final_text).send()
+    except Exception as exc:
+        tracer.log_error(f"{type(exc).__name__}: {exc}")
+        await cl.Message(content=CUSTOMER_ERROR_MESSAGE).send()
         return
 
-    if final_text:
-        tracer.log_agent_response(final_text)
-        history.append(AIMessage(content=final_text))
-    else:
-        tracer.log_error("No final response generated by agent.")
-        await cl.Message(content="⚠️ I wasn't able to generate a response. Please try again.").send()
-
     tracer.log_session_end()
-    cl.user_session.set("messages", history)

@@ -1,70 +1,52 @@
-import os
-import sqlite3
 from langchain_core.tools import tool
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "sole_syntax.db")
+from application.support_service import SupportService
+from infrastructure.database import get_database_url
+
+SUPPORT_DATABASE_URL = get_database_url()
 
 
-def _get_conn():
-    return sqlite3.connect(DB_PATH)
+def _service() -> SupportService:
+    return SupportService(SUPPORT_DATABASE_URL)
 
 
 @tool
 def lookup_customer(query: str) -> str:
     """Look up a customer by email address or full name. Returns customer profile and loyalty tier."""
-    conn = _get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id, name, email, phone, loyalty_tier, annual_spend FROM customers "
-        "WHERE LOWER(email) = LOWER(?) OR LOWER(name) = LOWER(?)",
-        (query, query),
-    )
-    row = cur.fetchone()
-    conn.close()
-    if not row:
+    customer = _service().lookup_customer(query)
+    if not customer:
         return f"No customer found matching '{query}'. Please verify the email or name."
-    cid, name, email, phone, tier, spend = row
     return (
         f"Customer found:\n"
-        f"  ID: {cid}\n"
-        f"  Name: {name}\n"
-        f"  Email: {email}\n"
-        f"  Phone: {phone}\n"
-        f"  Loyalty Tier: {tier}\n"
-        f"  Annual Spend: ${spend:.2f}"
+        f"  ID: {customer.id}\n"
+        f"  Name: {customer.name}\n"
+        f"  Email: {customer.email}\n"
+        f"  Phone: {customer.phone}\n"
+        f"  Loyalty Tier: {customer.loyalty_tier}\n"
+        f"  Annual Spend: ${customer.annual_spend:.2f}"
     )
 
 
 @tool
-def get_order_details(order_id: str) -> str:
-    """Retrieve full order details by Order ID (e.g. ORD-001)."""
-    conn = _get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """SELECT o.order_id, c.name, c.email, c.loyalty_tier,
-                  o.product, o.size, o.price, o.discount_pct,
-                  o.delivery_date, o.status, o.condition,
-                  o.has_receipt, o.is_defective, o.refund_status
-           FROM orders o JOIN customers c ON o.customer_id = c.id
-           WHERE UPPER(o.order_id) = UPPER(?)""",
-        (order_id,),
+def get_order_details(customer_query: str, order_id: str) -> str:
+    """Retrieve an order only when it belongs to the supplied customer name or email."""
+    order = _service().get_order(
+        customer_query=customer_query,
+        order_id=order_id,
     )
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        return f"No order found with ID '{order_id}'."
-    (oid, name, email, tier, product, size, price, discount,
-     delivery, status, condition, has_receipt, is_defective, refund_status) = row
+    if not order:
+        return "No matching order was found for the supplied customer and Order ID."
     return (
         f"Order Details:\n"
-        f"  Order ID: {oid}\n"
-        f"  Customer: {name} ({email}) — {tier} tier\n"
-        f"  Product: {product} | Size: {size}\n"
-        f"  Price: ${price:.2f} | Discount: {discount}%\n"
-        f"  Delivery Date: {delivery}\n"
-        f"  Order Status: {status}\n"
-        f"  Item Condition: {condition}\n"
-        f"  Has Receipt/Order ID: {'Yes' if has_receipt else 'No'}\n"
-        f"  Defective: {'Yes' if is_defective else 'No'}\n"
-        f"  Current Refund Status: {refund_status}"
+        f"  Order ID: {order.order_id}\n"
+        f"  Customer: {order.customer_name} ({order.customer_email}) — "
+        f"{order.loyalty_tier} tier\n"
+        f"  Product: {order.product} | Size: {order.size}\n"
+        f"  Price: ${order.price:.2f} | Discount: {order.discount_pct}%\n"
+        f"  Delivery Date: {order.delivery_date}\n"
+        f"  Order Status: {order.status}\n"
+        f"  Item Condition: {order.condition}\n"
+        f"  Has Receipt/Order ID: {'Yes' if order.has_receipt else 'No'}\n"
+        f"  Defective: {'Yes' if order.is_defective else 'No'}\n"
+        f"  Current Refund Status: {order.refund_status}"
     )

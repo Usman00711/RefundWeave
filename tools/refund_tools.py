@@ -1,96 +1,82 @@
-import os
-import sqlite3
 from langchain_core.tools import tool
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "sole_syntax.db")
+from application.support_service import RefundActionStatus, SupportService
+from infrastructure.database import get_database_url
+from tools.policy_tools import format_policy_decision
+
+SUPPORT_DATABASE_URL = get_database_url()
 
 
 @tool
-def process_refund(order_id: str, reason: str) -> str:
+def process_refund(customer_query: str, order_id: str) -> str:
     """
-    Approve and process a refund for an eligible order.
-    Only call this AFTER check_refund_eligibility confirms the order is ELIGIBLE.
+    Process a refund after independently verifying ownership and eligibility.
+    The operation is transactional and safe to retry.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT price, product, refund_status FROM orders WHERE UPPER(order_id) = UPPER(?)",
-        (order_id,),
+    result = SupportService(SUPPORT_DATABASE_URL).process_refund(
+        customer_query=customer_query,
+        order_id=order_id,
     )
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return f"Error: Order '{order_id}' not found."
-
-    price, product, refund_status = row
-    if refund_status == "approved":
-        conn.close()
-        return f"Order {order_id} has already been refunded."
-
-    cur.execute(
-        "UPDATE orders SET refund_status = 'approved' WHERE UPPER(order_id) = UPPER(?)",
-        (order_id,),
-    )
-    conn.commit()
-    conn.close()
+    decision = result.decision
+    if result.status is RefundActionStatus.BLOCKED:
+        return f"REFUND BLOCKED ✗\n{format_policy_decision(decision)}"
 
     return (
         f"REFUND APPROVED ✓\n"
-        f"  Order: {order_id.upper()} — {product}\n"
-        f"  Amount: ${price:.2f}\n"
-        f"  Reason: {reason}\n"
-        f"  The refund of ${price:.2f} will be returned to the original payment method "
+        f"  Order: {decision.order_id} — {decision.product}\n"
+        f"  Amount: ${decision.refund_amount:.2f}\n"
+        f"  Policy Decision: {decision.reason_code.value}\n"
+        f"  The refund of ${decision.refund_amount:.2f} will be returned to the original payment method "
         f"within 5–7 business days."
     )
 
 
 @tool
-def deny_refund(order_id: str, reason: str) -> str:
+def deny_refund(customer_query: str, order_id: str) -> str:
     """
-    Deny a refund request for a non-eligible order.
-    Only call this AFTER check_refund_eligibility confirms the order is DENIED.
+    Record a denial after independently verifying ownership and ineligibility.
+    The language model cannot supply or override the policy reason.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT product, refund_status FROM orders WHERE UPPER(order_id) = UPPER(?)",
-        (order_id,),
+    result = SupportService(SUPPORT_DATABASE_URL).deny_refund(
+        customer_query=customer_query,
+        order_id=order_id,
     )
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return f"Error: Order '{order_id}' not found."
-
-    product, refund_status = row
-    if refund_status == "denied":
-        conn.close()
-        return f"Order {order_id} has already been denied."
-
-    cur.execute(
-        "UPDATE orders SET refund_status = 'denied' WHERE UPPER(order_id) = UPPER(?)",
-        (order_id,),
-    )
-    conn.commit()
-    conn.close()
+    decision = result.decision
+    if result.status is RefundActionStatus.BLOCKED:
+        prefix = "DENIAL BLOCKED" if decision.eligible else "DENIAL NOT RECORDED"
+        return f"{prefix} ✗\n{format_policy_decision(decision)}"
+    if decision.reason_code.value == "previously_denied":
+        return f"REFUND ALREADY DENIED\n{format_policy_decision(decision)}"
 
     return (
         f"REFUND DENIED ✗\n"
-        f"  Order: {order_id.upper()} — {product}\n"
-        f"  Reason: {reason}\n"
+        f"  Order: {decision.order_id} — {decision.product}\n"
+        f"  Reason Code: {decision.reason_code.value}\n"
+        f"  Reason: {decision.explanation}\n"
         f"  If you believe this decision is incorrect, you may request escalation "
         f"to a human supervisor who will review your case within 24 hours."
     )
 
 
 @tool
-def escalate_to_human(order_id: str, issue_summary: str) -> str:
+def escalate_to_human(customer_query: str, order_id: str, issue_summary: str) -> str:
     """
     Escalate a disputed refund case to a human supervisor.
     Use when the customer disputes a denial or the case is too complex to resolve automatically.
     """
+    result = SupportService(SUPPORT_DATABASE_URL).escalate(
+        customer_query=customer_query,
+        order_id=order_id,
+        issue_summary=issue_summary,
+    )
+    decision = result.decision
+    if not result.created:
+        return f"ESCALATION BLOCKED ✗\n{format_policy_decision(result.decision)}"
+
     return (
         f"ESCALATED TO SUPERVISOR ⚡\n"
-        f"  Order: {order_id.upper()}\n"
+        f"  Order: {decision.order_id}\n"
+        f"  Ticket: {result.ticket_id}\n"
         f"  Issue: {issue_summary}\n"
         f"  A Sole Syntax supervisor will review this case and contact the customer "
         f"via email within 24 hours. Reference this ticket for follow-up."
