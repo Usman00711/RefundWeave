@@ -1,12 +1,16 @@
 """Version 1 support API routes."""
 
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Response, status
+from fastapi.responses import StreamingResponse
 
-from api.dependencies import get_support_service
+from api.chat import stream_workflow
+from api.dependencies import get_chat_graph, get_support_service
 from api.errors import ApiError
 from api.schemas import (
+    ChatStreamRequest,
     CustomerLookupRequest,
     CustomerResponse,
     ErrorResponse,
@@ -18,11 +22,45 @@ from api.schemas import (
     RefundConfirmationRequest,
     RefundConfirmationResponse,
 )
+from api.security import enforce_chat_rate_limit
 from application.support_service import SupportService
 
 router = APIRouter(prefix="/api/v1")
 Service = Annotated[SupportService, Depends(get_support_service)]
+ChatGraph = Annotated[object, Depends(get_chat_graph)]
 NOT_FOUND_RESPONSE = {404: {"model": ErrorResponse, "description": "Record not found"}}
+
+
+@router.post(
+    "/chat/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Server-Sent Events containing workflow progress and the final message.",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        }
+    },
+    tags=["chat"],
+)
+async def chat_stream(
+    request: ChatStreamRequest,
+    _rate_limit: Annotated[None, Depends(enforce_chat_rate_limit)],
+    graph: ChatGraph,
+) -> StreamingResponse:
+    thread_id = str(request.thread_id or uuid4())
+    return StreamingResponse(
+        stream_workflow(
+            graph=graph,
+            message=request.message,
+            thread_id=thread_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/health", response_model=HealthResponse, tags=["operations"])

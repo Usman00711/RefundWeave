@@ -62,6 +62,12 @@ services:
     environment:
       SOLE_SYNTAX_DATABASE_URL: mysql+pymysql://sole_syntax:${MYSQL_PASSWORD:-sole_syntax}@mysql:3306/sole_syntax?charset=utf8mb4
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200,http://localhost:8000}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-oss-120b:free}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      CHAT_RATE_LIMIT_REQUESTS: ${CHAT_RATE_LIMIT_REQUESTS:-12}
+      CHAT_RATE_LIMIT_WINDOW_SECONDS: ${CHAT_RATE_LIMIT_WINDOW_SECONDS:-60}
+      TRUST_PROXY_HEADERS: "true"
     ports:
       - "${API_PORT:-8001}:8001"
     depends_on:
@@ -106,6 +112,20 @@ services:
       seed:
         condition: service_completed_successfully
 
+  web:
+    build:
+      context: ./frontend
+    ports:
+      - "${FRONTEND_PORT:-4200}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   seed-reset:
     profiles: ["tools"]
     image: sole-syntax-app:local
@@ -117,5 +137,39 @@ services:
       mysql:
         condition: service_healthy
 
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v3.12.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:13.0.2
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
 volumes:
   mysql_data:
+  prometheus_data:
+  grafana_data:

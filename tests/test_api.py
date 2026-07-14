@@ -31,6 +31,40 @@ def test_health_reports_database_readiness(api_context):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "database": "ready", "version": "v1"}
+    assert response.headers["x-request-id"]
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert "camera=()" in response.headers["permissions-policy"]
+
+
+def test_request_id_is_preserved_when_valid(api_context):
+    client, _db_path = api_context
+
+    response = client.get("/api/v1/health", headers={"X-Request-ID": "portfolio-demo-123"})
+
+    assert response.headers["x-request-id"] == "portfolio-demo-123"
+
+
+def test_invalid_request_id_is_replaced(api_context):
+    client, _db_path = api_context
+
+    response = client.get("/api/v1/health", headers={"X-Request-ID": "unsafe value"})
+
+    assert response.headers["x-request-id"] != "unsafe value"
+    assert len(response.headers["x-request-id"]) == 36
+
+
+def test_internal_metrics_report_route_and_status(api_context):
+    client, _db_path = api_context
+    client.get("/api/v1/health")
+
+    response = client.get("/internal/metrics")
+
+    assert response.status_code == 200
+    assert "text/plain" in response.headers["content-type"]
+    assert "refundweave_http_requests_total" in response.text
+    assert 'route="/api/v1/health"' in response.text
+    assert 'status="200"' in response.text
 
 
 def test_customer_lookup_returns_typed_public_fields(api_context):

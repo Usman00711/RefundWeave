@@ -1,0 +1,170 @@
+name: refundweave
+
+x-backend-environment: &backend-environment
+  SOLE_SYNTAX_DATABASE_URL: mysql+pymysql://refundweave:${MYSQL_PASSWORD:?set MYSQL_PASSWORD}@mysql:3306/refundweave?charset=utf8mb4
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: refundweave
+      MYSQL_USER: refundweave
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  migrate:
+    image: ${REFUNDWEAVE_API_IMAGE:-ghcr.io/usman00711/refundweave-api:latest}
+    restart: "no"
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    environment: *backend-environment
+    networks:
+      - data
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  seed:
+    image: ${REFUNDWEAVE_API_IMAGE:-ghcr.io/usman00711/refundweave-api:latest}
+    restart: "no"
+    command: ["python", "-m", "data.seed_db"]
+    environment: *backend-environment
+    networks:
+      - data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  api:
+    image: ${REFUNDWEAVE_API_IMAGE:-ghcr.io/usman00711/refundweave-api:latest}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      <<: *backend-environment
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-oss-120b:free}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      CHAT_RATE_LIMIT_REQUESTS: ${CHAT_RATE_LIMIT_REQUESTS:-12}
+      CHAT_RATE_LIMIT_WINDOW_SECONDS: ${CHAT_RATE_LIMIT_WINDOW_SECONDS:-60}
+      TRUST_PROXY_HEADERS: "true"
+      CORS_ORIGINS: https://${DOMAIN:?set DOMAIN}
+      LOG_FORMAT: json
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - app
+      - data
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/v1/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  web:
+    image: ${REFUNDWEAVE_WEB_IMAGE:-ghcr.io/usman00711/refundweave-web:latest}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    networks:
+      - app
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  proxy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - app
+    depends_on:
+      web:
+        condition: service_healthy
+
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v3.12.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - app
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:13.0.2
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - app
+    depends_on:
+      - prometheus
+
+networks:
+  app:
+  data:
+    internal: true
+
+volumes:
+  mysql_data:
+  caddy_data:
+  caddy_config:
+  prometheus_data:
+  grafana_data:

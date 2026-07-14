@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -18,6 +19,10 @@ OrderId = Annotated[
         max_length=40,
         pattern=r"^[Oo][Rr][Dd]-[A-Za-z0-9-]+$",
     ),
+]
+ChatMessage = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=4000),
 ]
 
 
@@ -81,6 +86,14 @@ class RefundConfirmationResponse(BaseModel):
     status: RefundActionStatus
     message: str
     decision: PolicyDecisionResponse
+
+
+class ChatStreamRequest(BaseModel):
+    message: ChatMessage
+    thread_id: UUID | None = Field(
+        default=None,
+        description="Reuse the thread ID returned by the first event for follow-up messages.",
+    )
 
 
 class HealthResponse(BaseModel):

@@ -28,6 +28,16 @@ CONFIRMATION_PHRASES = {
     "yes please",
 }
 CANCELLATION_PHRASES = {"cancel", "cancel refund", "do not proceed", "no", "no thanks", "stop"}
+WORKFLOW_LABELS = {
+    "interpret_request": "Understand request",
+    "identify_customer": "Identify customer",
+    "verify_order": "Verify order ownership",
+    "evaluate_policy": "Evaluate refund policy",
+    "request_confirmation": "Wait for confirmation",
+    "execute_refund": "Execute confirmed refund",
+    "policy_response": "Explain policy decision",
+    "escalate": "Escalate to supervisor",
+}
 
 
 def _normalized_phrase(message: str) -> str:
@@ -92,6 +102,8 @@ def create_workflow(
             return {
                 **base,
                 "requested_action": "respond",
+                "stage": "awaiting_confirmation",
+                "awaiting_confirmation": True,
                 "response_text": (
                     "I have not processed the refund. Reply **confirm refund** to approve it, "
                     "or **cancel** to stop."

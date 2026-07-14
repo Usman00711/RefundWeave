@@ -1,0 +1,226 @@
+<main class="shell">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="RefundWeave home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 40 40" role="img">
+          <path d="M8 12.5c7-7 17-7 24 0M8 27.5c7 7 17 7 24 0M11 20h18" />
+          <circle cx="8" cy="12.5" r="2.3" />
+          <circle cx="32" cy="12.5" r="2.3" />
+          <circle cx="8" cy="27.5" r="2.3" />
+          <circle cx="32" cy="27.5" r="2.3" />
+        </svg>
+      </span>
+      <span>
+        <strong>RefundWeave</strong>
+        <small>Customer support</small>
+      </span>
+    </a>
+
+    <div class="topbar-actions">
+      <span class="status" [class.status-working]="isStreaming()">
+        <span class="status-dot" aria-hidden="true"></span>
+        {{ isStreaming() ? 'Replying' : 'Online' }}
+      </span>
+      <button
+        class="new-chat"
+        type="button"
+        (click)="startNewConversation()"
+        [disabled]="isStreaming()"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        New conversation
+      </button>
+    </div>
+  </header>
+
+  <section class="workspace">
+    <section class="conversation" aria-label="Support conversation">
+      <div class="chat-heading">
+        <div class="heading-avatar" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M7 8.5a5 5 0 0 1 10 0v1.2a4.3 4.3 0 0 1-1.8 3.5L12 15.5l-3.2-2.3A4.3 4.3 0 0 1 7 9.7V8.5Z" />
+            <path d="M5 20c.8-3.2 3.2-4.8 7-4.8s6.2 1.6 7 4.8" />
+          </svg>
+        </div>
+        <div>
+          <h1>How can we help?</h1>
+          <p>Share your name, order number, and what you need help with.</p>
+        </div>
+      </div>
+
+      <div class="messages" aria-live="polite" aria-relevant="additions">
+        @for (message of messages(); track message.id) {
+          <article class="message" [class.message-user]="message.role === 'user'">
+            <div class="avatar" aria-hidden="true">
+              @if (message.role === 'assistant') {
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M7 8.5a5 5 0 0 1 10 0v1.2a4.3 4.3 0 0 1-1.8 3.5L12 15.5l-3.2-2.3A4.3 4.3 0 0 1 7 9.7V8.5Z"
+                  />
+                  <path d="M5 20c.8-3.2 3.2-4.8 7-4.8s6.2 1.6 7 4.8" />
+                </svg>
+              } @else {
+                <span>You</span>
+              }
+            </div>
+            <div class="bubble">
+              <span class="speaker">{{
+                message.role === 'assistant' ? 'RefundWeave' : 'You'
+              }}</span>
+              <p>{{ displayText(message.text) }}</p>
+            </div>
+          </article>
+        }
+
+        @if (isStreaming()) {
+          <article class="message loading-message">
+            <div class="avatar" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M7 8.5a5 5 0 0 1 10 0v1.2a4.3 4.3 0 0 1-1.8 3.5L12 15.5l-3.2-2.3A4.3 4.3 0 0 1 7 9.7V8.5Z"
+                />
+                <path d="M5 20c.8-3.2 3.2-4.8 7-4.8s6.2 1.6 7 4.8" />
+              </svg>
+            </div>
+            <div class="bubble typing" aria-label="RefundWeave is working">
+              <span></span><span></span><span></span>
+            </div>
+          </article>
+        }
+      </div>
+
+      @if (messages().length === 1 && !isStreaming()) {
+        <div class="quick-start" aria-label="Example requests">
+          <span>Try an example</span>
+        </div>
+        <div class="starter-prompts" aria-label="Example requests">
+          <button
+            type="button"
+            (click)="usePrompt('My name is Alice Johnson. Refund order ORD-001.')"
+          >
+            <span>Eligible return</span>
+            <small>Alice · ORD-001</small>
+          </button>
+          <button type="button" (click)="usePrompt('I am David Kim. I want a refund for ORD-004.')">
+            <span>Check final sale</span>
+            <small>David · ORD-004</small>
+          </button>
+          <button
+            type="button"
+            (click)="usePrompt('My name is Noah Jackson. Return defective order ORD-014.')"
+          >
+            <span>Defective item</span>
+            <small>Noah · ORD-014</small>
+          </button>
+        </div>
+      }
+
+      @if (errorMessage()) {
+        <div class="error-banner" role="alert">
+          <span aria-hidden="true">!</span>
+          {{ errorMessage() }}
+        </div>
+      }
+
+      @if (awaitingConfirmation() && !isStreaming()) {
+        <div class="confirmation-bar">
+          <div>
+            <strong>Your approval is required</strong>
+            <span>No database change happens until you confirm.</span>
+          </div>
+          <div>
+            <button class="cancel-action" type="button" (click)="usePrompt('cancel')">
+              Cancel
+            </button>
+            <button class="confirm-action" type="button" (click)="usePrompt('confirm refund')">
+              Confirm refund
+            </button>
+          </div>
+        </div>
+      }
+
+      <form class="composer" (ngSubmit)="send()">
+        <label for="message">Message RefundWeave</label>
+        <div class="composer-row">
+          <textarea
+            id="message"
+            name="message"
+            rows="1"
+            maxlength="4000"
+            placeholder="Share your name, Order ID, and issue…"
+            [ngModel]="draft()"
+            (ngModelChange)="draft.set($event)"
+            [disabled]="isStreaming()"
+          ></textarea>
+          <button
+            type="submit"
+            class="send-button"
+            [disabled]="!draft().trim() || isStreaming()"
+            aria-label="Send message"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m5 12 14-7-4.5 14-2.7-5.2L5 12Z" />
+              <path d="m11.8 13.8 3.5-3.6" />
+            </svg>
+          </button>
+        </div>
+        <p>
+          We’ll check the policy and ask for your approval before processing a refund.
+        </p>
+      </form>
+    </section>
+
+    <aside class="workflow-panel" aria-label="Workflow progress">
+      <div class="panel-heading">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M7 4h10M7 12h10M7 20h10" />
+            <circle cx="4" cy="4" r="1.5" />
+            <circle cx="4" cy="12" r="1.5" />
+            <circle cx="4" cy="20" r="1.5" />
+          </svg>
+        </span>
+        <div>
+          <strong>Request status</strong>
+          <span>Updates appear as we check your order</span>
+        </div>
+      </div>
+
+      @if (steps().length === 0) {
+        <div class="empty-workflow">
+          <div class="empty-icon" aria-hidden="true"><span></span></div>
+          <strong>Nothing to review yet</strong>
+          <p>Start a message and we’ll show each completed step here.</p>
+        </div>
+      } @else {
+        <ol class="workflow-list">
+          @for (step of steps(); track step.node; let index = $index) {
+            <li>
+              <div class="step-number">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 10 3 3 7-7" /></svg>
+              </div>
+              <div>
+                <span>Step {{ index + 1 }}</span>
+                <strong>{{ step.label }}</strong>
+                <p>{{ step.detail }}</p>
+              </div>
+            </li>
+          }
+        </ol>
+      }
+
+      <div class="safety-note">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3 5.5 5.8v5.4c0 4.2 2.7 7.7 6.5 9.8 3.8-2.1 6.5-5.6 6.5-9.8V5.8L12 3Z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+        <div>
+          <strong>Nothing is processed automatically</strong>
+          <p>We always ask for your confirmation before a refund is processed.</p>
+        </div>
+      </div>
+    </aside>
+  </section>
+</main>

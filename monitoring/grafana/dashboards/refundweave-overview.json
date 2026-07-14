@@ -1,0 +1,77 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "auto" },
+      "targets": [{ "expr": "sum(rate(refundweave_http_requests_total[5m]))", "refId": "A" }],
+      "title": "Request rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "max": 100, "min": 0, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "auto" },
+      "targets": [{ "expr": "100 * sum(rate(refundweave_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(refundweave_http_requests_total[5m])), 0.000001)", "refId": "A" }],
+      "title": "Server error rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "textMode": "auto" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(refundweave_http_request_duration_seconds_bucket[5m])))", "refId": "A" }],
+      "title": "P95 latency",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 5 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
+      "targets": [{ "expr": "sum by (route) (rate(refundweave_http_requests_total[5m]))", "legendFormat": "{{route}}", "refId": "A" }],
+      "title": "Traffic by route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 5 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, route) (rate(refundweave_http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{route}}", "refId": "A" }],
+      "title": "P95 latency by route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 14 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
+      "targets": [{ "expr": "sum by (method) (refundweave_http_requests_in_progress)", "legendFormat": "{{method}}", "refId": "A" }],
+      "title": "Requests in progress",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": ["refundweave", "portfolio", "api"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "RefundWeave API Overview",
+  "uid": "refundweave-api-overview",
+  "version": 1
+}

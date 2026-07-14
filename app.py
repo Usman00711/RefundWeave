@@ -4,22 +4,11 @@ import chainlit as cl
 from langchain_core.messages import HumanMessage
 
 from agent import tracer
-from agent.graph import build_graph
+from agent.graph import WORKFLOW_LABELS, build_graph
 
 CUSTOMER_ERROR_MESSAGE = (
     "⚠️ I couldn't complete that request right now. Please try again in a moment."
 )
-
-WORKFLOW_LABELS = {
-    "identify_customer": "Identify customer",
-    "verify_order": "Verify order ownership",
-    "evaluate_policy": "Evaluate refund policy",
-    "request_confirmation": "Wait for confirmation",
-    "execute_refund": "Execute confirmed refund",
-    "policy_response": "Explain policy decision",
-    "escalate": "Escalate to supervisor",
-}
-
 
 @cl.on_chat_start
 async def on_chat_start():
